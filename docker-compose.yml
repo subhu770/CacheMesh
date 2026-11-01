@@ -1,0 +1,149 @@
+version: '3.8'
+
+services:
+  # =====================================================================
+  # CacheMesh Gateway / Primary Visualizer & Router
+  # =====================================================================
+  cachemesh-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cachemesh-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - CLUSTER_ROLE=gateway
+      - REDIS_URL=redis://redis:6379
+      - SHARD_ALPHA_URL=http://cache-node-alpha:3000
+      - SHARD_BETA_URL=http://cache-node-beta:3000
+      - SHARD_GAMMA_URL=http://cache-node-gamma:3000
+    depends_on:
+      cache-node-alpha:
+        condition: service_healthy
+      cache-node-beta:
+        condition: service_healthy
+      cache-node-gamma:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/ring || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - cachemesh-net
+
+  # =====================================================================
+  # Physical Shard 1: Node-Alpha (us-east, LRU Eviction Engine)
+  # =====================================================================
+  cache-node-alpha:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cache-node-alpha
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - SHARD_ID=node-alpha
+      - SHARD_NAME=Node-Alpha (us-east)
+      - SHARD_COLOR=#10b981
+      - SHARD_POLICY=LRU
+      - SHARD_VNODE_COUNT=100
+      - SHARD_MAX_MEMORY_MB=10
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/ring || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - cachemesh-net
+
+  # =====================================================================
+  # Physical Shard 2: Node-Beta (eu-central, LRU Eviction Engine)
+  # =====================================================================
+  cache-node-beta:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cache-node-beta
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - SHARD_ID=node-beta
+      - SHARD_NAME=Node-Beta (eu-central)
+      - SHARD_COLOR=#06b6d4
+      - SHARD_POLICY=LRU
+      - SHARD_VNODE_COUNT=100
+      - SHARD_MAX_MEMORY_MB=10
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/ring || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - cachemesh-net
+
+  # =====================================================================
+  # Physical Shard 3: Node-Gamma (ap-southeast, LFU Eviction Engine)
+  # =====================================================================
+  cache-node-gamma:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cache-node-gamma
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - SHARD_ID=node-gamma
+      - SHARD_NAME=Node-Gamma (ap-southeast)
+      - SHARD_COLOR=#8b5cf6
+      - SHARD_POLICY=LFU
+      - SHARD_VNODE_COUNT=100
+      - SHARD_MAX_MEMORY_MB=10
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/ring || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - cachemesh-net
+
+  # =====================================================================
+  # Backing Store Fallback & Distributed Cluster Heartbeat
+  # =====================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: cachemesh-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - cachemesh-net
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  cachemesh-net:
+    driver: bridge
